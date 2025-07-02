@@ -5,8 +5,75 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 import numpy as np
 from time import time
+from tqdm import tqdm
+import wandb
 
-def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100):
+def groove_train(device, train_loader, val_loader, encoder, decoder, enc_opt, dec_opt, epochs=100, kl_weight=0.001):
+    wandb.init(project="drum-vae", config={
+        "epochs": epochs,
+        "kl_weight": kl_weight,
+    })
+
+    history = {"train_loss": [], "val_loss": []}    
+    history = {"train_loss": [], "val_loss": []}
+
+    for epoch in range(1, epochs + 1):
+        start = time()
+
+        # Train
+        encoder.train()
+        decoder.train()
+        train_loss = 0
+        for batch in tqdm(train_loader, desc=f"Train Epoch {epoch}"):
+            batch = batch.to(device)
+            x = batch[:, :, :27]
+            target = batch[:, :, 27:]
+
+            enc_opt.zero_grad()
+            dec_opt.zero_grad()
+
+            z, mu, std = encoder(x)
+            out, hits, vels, offs = decoder(z, seq_len=x.size(1), target=target, teacher_forcing_ratio=0.5) # seq_len=32
+            recon_loss = decoder.compute_loss(target, hits, vels, offs)
+            kl_loss = -0.5 * torch.sum(1 + std - mu.pow(2) - std.exp()) / mu.size(0)
+            loss = recon_loss + kl_weight * kl_loss
+
+            loss.backward()
+            enc_opt.step()
+            dec_opt.step()
+
+            train_loss += loss.item()
+
+        train_loss /= len(train_loader)
+        wandb.log({"train_loss": train_loss}, step=epoch)
+        history["train_loss"].append(train_loss)
+
+        # Validation
+        encoder.eval()
+        decoder.eval()
+        val_loss = 0
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc=f"Val Epoch {epoch}"):
+                batch = batch.to(device)
+                x = batch[:, :, :27]
+                target = batch[:, :, 27:]
+
+                z, mu, std = encoder(x)
+                out, hits, vels, offs = decoder(z, seq_len=x.size(1), target=None, teacher_forcing_ratio=0.0)
+                recon_loss = decoder.compute_loss(target, hits, vels, offs)
+                kl_loss = -0.5 * torch.sum(1 + std - mu.pow(2) - std.exp()) / mu.size(0)
+                loss = recon_loss + kl_weight * kl_loss
+                val_loss += loss.item()
+
+        val_loss /= len(val_loader)
+        wandb.log({"val_loss": val_loss}, step=epoch)
+        history["val_loss"].append(val_loss)
+
+        print(f"[Epoch {epoch}] Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Time: {time() - start:.2f}s")
+
+    return history
+
+def groove_train_not_teacherforcing(device, train_loader, val_loader, model, optimizer, epochs=100):
     history = {
         'train_loss': [],
         'val_loss': [],
