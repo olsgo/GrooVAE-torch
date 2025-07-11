@@ -79,7 +79,7 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100,
                 
                 # Forward pass
                 z, x_val_mu, x_val_std = encoder(x_val)
-                output, output_hits, output_velocities, output_offsets = decoder(z, seq_len)
+                output, output_hits, output_velocities, output_offsets = decoder(z, seq_len, target=None, teacher_forcing_ratio=0.0)
                 
                 # Loss calculation
                 reconstruction_loss = decoder.compute_loss(x_val_target, output_hits, output_velocities, output_offsets)
