@@ -2,11 +2,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
+from tqdm import tqdm
 from torch.utils.data import DataLoader
 import numpy as np
 from time import time
 
-def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100):
+def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100, kl_weight=0.001):
     history = {
         'train_loss': [],
         'val_loss': [],
@@ -28,14 +29,14 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100)
         encoder.train()
         decoder.train()
         
-        for batch_idx, data in enumerate(train_loader):
+        for batch in tqdm(train_loader, desc=f"Train Epoch {epoch}"):
             
-            data = data.to(device)
-            batch_size = data.size(0)
-            seq_len = data.size(1)
+            batch = batch.to(device)
+            batch_size = batch.size(0)
+            seq_len = batch.size(1)
             
-            x_train = data[:, :, :27]   
-            x_train_target = data[:, :, 27:]  
+            x_train = batch[:, :, :27]   
+            x_train_target = batch[:, :, 27:]  
             
             enc_optimizer.zero_grad()
             dec_optimizer.zero_grad()
@@ -44,14 +45,12 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100)
             z, x_train_mu, x_train_std = encoder(x_train)
             
             # Decoder
-            output, output_hits, output_velocities, output_offsets = decoder(z, seq_len)
+            output, output_hits, output_velocities, output_offsets = decoder(z, seq_len, target=x_train_target, teacher_forcing_ratio=0.5)
             
             # Loss calculation
             reconstruction_loss = decoder.compute_loss(x_train_target, output_hits, output_velocities, output_offsets)
-            logvar = x_train_std.pow(2).log()
-            kl_loss = -0.5 * torch.sum(1 + logvar - x_train_mu.pow(2) - logvar.exp())
-            beta = 0.2
-            loss = reconstruction_loss + beta * kl_loss 
+            kl_loss =-0.5 * torch.sum(1 + x_train_std - x_train_mu.pow(2) - x_train_std.exp()) / x_train_mu.size(0)
+            loss = reconstruction_loss + kl_weight * kl_loss 
             
             # Backward
             loss.backward()
@@ -70,13 +69,13 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100)
         encoder.eval()
         decoder.eval()
         with torch.no_grad():
-            for batch_idx, data in enumerate(val_loader):
-                data = data.to(device)
-                batch_size = data.size(0)
-                seq_len = data.size(1)
+            for batch in tqdm(val_loader, desc=f"Val Epoch {epoch}"):
+                batch = batch.to(device)
+                batch_size = batch.size(0)
+                seq_len = batch.size(1)
                 
-                x_val = data[:, :, :27]  
-                x_val_target = data[:, :, 27:]  
+                x_val = batch[:, :, :27]  
+                x_val_target = batch[:, :, 27:]  
                 
                 # Forward pass
                 z, x_val_mu, x_val_std = encoder(x_val)
@@ -84,9 +83,7 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100)
                 
                 # Loss calculation
                 reconstruction_loss = decoder.compute_loss(x_val_target, output_hits, output_velocities, output_offsets)
-                logvar = x_val_std.pow(2).log()
-                kl_loss = -0.5 * torch.sum(1 + logvar - x_val_mu.pow(2) - logvar.exp())
-                beta = 0.2
+                kl_loss = -0.5 * torch.sum(1 + x_val_std - x_val_mu.pow(2) - x_val_std.exp()) / x_val_mu.size(0))
                 loss = reconstruction_loss + beta * kl_loss
                 
                 val_loss += loss.item()
