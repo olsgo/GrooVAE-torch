@@ -3,11 +3,9 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as dist
-from torch.utils.data import DataLoader
 import numpy as np
-from time import time
 
-class Encoder(nn.Module):
+class Encoder_base(nn.Module):
     def __init__(self, input_size, hidden_size, latent_dim):
         super(Encoder, self).__init__()
         self.hidden_size = hidden_size
@@ -30,7 +28,7 @@ class Encoder(nn.Module):
         return mu + eps * std
 
 
-class Decoder1(nn.Module):
+class Decoder_base(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_layers=2):
         super(Decoder, self).__init__()
         self.hidden_size = hidden_size
@@ -76,6 +74,51 @@ class Decoder1(nn.Module):
         loss = hits_loss + velocities_loss + offsets_loss
         
         return loss.mean()
+
+# -----------------------------
+# AttentionPooling Module
+# -----------------------------
+class AttentionPooling(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.attn = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, x):  # x: (B, T, D)
+        weights = self.attn(x)  # (B, T, 1)
+        weights = torch.softmax(weights, dim=1)  # normalize over T
+        pooled = (x * weights).sum(dim=1)  # (B, D)
+        return pooled
+
+# -----------------------------
+# Encoder with AttentionPooling
+# -----------------------------
+class Encoder(nn.Module):
+    def __init__(self, input_size, hidden_size, latent_dim):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.latent_dim = latent_dim        
+        self.lstm = nn.LSTM(input_size, hidden_size, bidirectional=True, batch_first=True)
+        self.pool = AttentionPooling(hidden_size * 2, hidden_size)
+        self.fc_mu = nn.Linear(hidden_size * 2, latent_dim) # Bidirectional이므로 * 2
+        self.fc_std = nn.Linear(hidden_size * 2, latent_dim)
+
+    def forward(self, x):
+        output, _ = self.lstm(x)  # output: (B, T, hidden*2)
+        pooled = self.pool(output)  # (B, hidden*2)
+        mu = self.fc_mu(pooled)
+        std = self.fc_std(pooled)
+        z = self.reparameterize(mu, std) # z : (512, 256)
+
+        return z, mu, std
+
+    def reparameterize(self, mu, std):
+        std = torch.exp(0.5 * std)
+        eps = torch.randn_like(std)
+        return mu + eps * std
         
 # -----------------------------
 # Decoder with teacher forcing
