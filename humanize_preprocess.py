@@ -1,12 +1,27 @@
 import pandas as pd
 import pretty_midi
 import pickle
+import os
+import sys
 from drum_utils import *
+from config import Config
 
-path = '/workspace/GrooVAE/data/midi_data/groove/'
-save_path = '/workspace/GrooVAE/data/data_processed/'
+# Initialize configuration
+config = Config()
+config.create_directories()
 
-df = pd.read_csv('/workspace/GrooVAE/data/midi_data/groove/info.csv')
+# Use configurable paths
+path = config.MIDI_DATA_DIR + '/'
+save_path = config.PROCESSED_DATA_DIR + '/'
+info_csv_path = os.path.join(config.MIDI_DATA_DIR, 'info.csv')
+
+# Check if data exists
+if not os.path.exists(info_csv_path):
+    print(f"Error: info.csv not found at {info_csv_path}")
+    print("Please ensure the groove dataset is placed in the correct directory.")
+    sys.exit(1)
+
+df = pd.read_csv(info_csv_path)
 
 humanize_train = []
 humanize_valid = []

@@ -1,0 +1,32 @@
+# PyTorch with MPS support for M1 Max
+torch>=2.1.0
+torchvision>=0.16.0
+torchaudio>=2.1.0
+
+# Core ML/AI dependencies
+numpy>=1.24.0
+pandas>=2.0.0
+scipy>=1.10.0
+
+# Audio/MIDI processing
+pretty_midi>=0.2.9
+librosa>=0.10.0
+
+# Visualization and monitoring
+matplotlib>=3.6.0
+seaborn>=0.12.0
+tqdm>=4.65.0
+
+# Model summary (torchsummary alternative)
+torchinfo>=1.8.0
+
+# Optional: Advanced monitoring (uncomment if needed)
+# tensorboard>=2.13.0
+# wandb>=0.15.0
+
+# Utilities
+pickle5>=0.0.11
+IPython>=8.10.0
+
+# Performance optimizations for M1
+accelerate>=0.20.0
