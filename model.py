@@ -4,10 +4,11 @@ import torch.optim as optim
 import torch.nn.functional as F
 import torch.distributions as dist
 import numpy as np
+import random
 
 class Encoder_base(nn.Module):
     def __init__(self, input_size, hidden_size, latent_dim):
-        super(Encoder, self).__init__()
+        super(Encoder_base, self).__init__()
         self.hidden_size = hidden_size
         self.latent_dim = latent_dim
         self.lstm = nn.LSTM(input_size, hidden_size, bidirectional=True, batch_first=True)
@@ -30,7 +31,7 @@ class Encoder_base(nn.Module):
 
 class Decoder_base(nn.Module):
     def __init__(self, input_size, hidden_size, output_size, num_layers=2):
-        super(Decoder, self).__init__()
+        super(Decoder_base, self).__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True)

@@ -29,7 +29,7 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100,
         encoder.train()
         decoder.train()
         
-        for batch in tqdm(train_loader, desc=f"Train Epoch {epoch}"):
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Train Epoch {epoch}")):
             
             batch = batch.to(device)
             batch_size = batch.size(0)
@@ -69,7 +69,7 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100,
         encoder.eval()
         decoder.eval()
         with torch.no_grad():
-            for batch in tqdm(val_loader, desc=f"Val Epoch {epoch}"):
+            for batch_idx, batch in enumerate(tqdm(val_loader, desc=f"Val Epoch {epoch}")):
                 batch = batch.to(device)
                 batch_size = batch.size(0)
                 seq_len = batch.size(1)
@@ -83,8 +83,8 @@ def groove_train(device, train_loader, val_loader, model, optimizer, epochs=100,
                 
                 # Loss calculation
                 reconstruction_loss = decoder.compute_loss(x_val_target, output_hits, output_velocities, output_offsets)
-                kl_loss = -0.5 * torch.sum(1 + x_val_std - x_val_mu.pow(2) - x_val_std.exp()) / x_val_mu.size(0))
-                loss = reconstruction_loss + beta * kl_loss
+                kl_loss = -0.5 * torch.sum(1 + x_val_std - x_val_mu.pow(2) - x_val_std.exp()) / x_val_mu.size(0)
+                loss = reconstruction_loss + kl_weight * kl_loss
                 
                 val_loss += loss.item()
         
