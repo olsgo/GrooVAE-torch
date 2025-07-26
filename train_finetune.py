@@ -110,12 +110,54 @@ def setup_optimizers_for_finetune(encoder, decoder, config, lr_factor=0.1):
     
     return enc_optimizer, dec_optimizer
 
+def load_full_model(model_path, device, config):
+    """Load a full model from a single .pth file"""
+    print(f"Loading full model from: {model_path}")
+    
+    # Initialize models with config parameters
+    encoder = Encoder(
+        input_size=config.ENC_INPUT_SIZE,
+        hidden_size=config.ENC_HIDDEN_SIZE,
+        latent_dim=config.ENC_LATENT_DIM
+    ).to(device)
+    
+    decoder = Decoder(
+        input_size=config.DEC_INPUT_SIZE,
+        hidden_size=config.DEC_HIDDEN_SIZE,
+        output_size=config.DEC_OUTPUT_SIZE
+    ).to(device)
+    
+    # Load the full model
+    try:
+        checkpoint = torch.load(model_path, map_location=device)
+        
+        # Handle different checkpoint formats
+        if 'encoder_state_dict' in checkpoint and 'decoder_state_dict' in checkpoint:
+            encoder.load_state_dict(checkpoint['encoder_state_dict'])
+            decoder.load_state_dict(checkpoint['decoder_state_dict'])
+        elif 'encoder' in checkpoint and 'decoder' in checkpoint:
+            encoder.load_state_dict(checkpoint['encoder'])
+            decoder.load_state_dict(checkpoint['decoder'])
+        else:
+            print(f"Checkpoint keys: {checkpoint.keys()}")
+            raise ValueError("Unsupported checkpoint format")
+        
+        print("✓ Full model loaded successfully!")
+        return encoder, decoder
+        
+    except Exception as e:
+        print(f"Error loading full model: {e}")
+        print("Initializing models with random weights instead.")
+        return encoder, decoder
+
 def main():
     parser = argparse.ArgumentParser(description='Fine-tune GrooVAE model')
     parser.add_argument('--model-name', type=str, help='Specific model to use (e.g., "1st_humanize")')
+    parser.add_argument('--model-path', type=str, help='Path to a full model .pth file')
     parser.add_argument('--list-models', action='store_true', help='List available pre-trained models')
-    parser.add_argument('--data-type', type=str, default='humanize', choices=['humanize', 'tapify'],
-                       help='Type of data to use for fine-tuning')
+    # Remove the choices parameter to allow any dataset name
+    parser.add_argument('--data-type', type=str, default='humanize',
+                       help='Type of data to use for fine-tuning (auto-discovered from processed directory)')
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for fine-tuning')
     parser.add_argument('--lr-factor', type=float, default=0.1, help='Learning rate reduction factor')
     parser.add_argument('--freeze-encoder', action='store_true', help='Freeze encoder during fine-tuning')
@@ -127,10 +169,13 @@ def main():
     # Initialize config
     config = Config()
     
-    # Find available models
-    available_models = find_pretrained_models()
+    # Setup device
+    device = config.get_device()
+    print(f"Using device: {device}")
     
+    # Handle --list-models first
     if args.list_models:
+        available_models = find_pretrained_models()
         print("Available pre-trained models:")
         if available_models:
             for name, paths in available_models.items():
@@ -143,33 +188,43 @@ def main():
             print("    *encoder*.pt and *decoder*.pt")
         return
     
-    if not available_models:
-        print("No pre-trained models found. Please check the model/ directory.")
-        return
-    
-    # Select model
-    if args.model_name:
-        if args.model_name not in available_models:
-            print(f"Model '{args.model_name}' not found. Available models: {list(available_models.keys())}")
+    # Load model based on --model-path or --model-name
+    if args.model_path:
+        # Load from specific path
+        if not os.path.exists(args.model_path):
+            print(f"Model file not found: {args.model_path}")
             return
-        selected_model = args.model_name
+        
+        print(f"Loading full model from: {args.model_path}")
+        encoder, decoder = load_full_model(args.model_path, device, config)
+        selected_model = os.path.splitext(os.path.basename(args.model_path))[0]
     else:
-        # Use the first available model
-        selected_model = list(available_models.keys())[0]
-        print(f"Using model: {selected_model}")
-    
-    # Setup device
-    device = config.get_device()
-    print(f"Using device: {device}")
-    
-    # Load pre-trained model
-    model_paths = available_models[selected_model]
-    encoder, decoder = load_pretrained_model(
-        model_paths['encoder'], 
-        model_paths['decoder'], 
-        device,
-        config
-    )
+        # Use existing logic for separate encoder/decoder files
+        available_models = find_pretrained_models()
+        
+        if not available_models:
+            print("No pre-trained models found. Please check the model/ directory.")
+            return
+        
+        # Select model
+        if args.model_name:
+            if args.model_name not in available_models:
+                print(f"Model '{args.model_name}' not found. Available models: {list(available_models.keys())}")
+                return
+            selected_model = args.model_name
+        else:
+            # Use the first available model
+            selected_model = list(available_models.keys())[0]
+            print(f"Using model: {selected_model}")
+        
+        # Load pre-trained model
+        model_paths = available_models[selected_model]
+        encoder, decoder = load_pretrained_model(
+            model_paths['encoder'], 
+            model_paths['decoder'], 
+            device,
+            config
+        )
     
     # Setup for fine-tuning
     encoder, decoder = setup_model_for_finetune(
@@ -192,7 +247,6 @@ def main():
     # Fine-tune the model
     print(f"Starting fine-tuning for {args.epochs} epochs...")
     
-    # Around line 196, replace the existing try block with:
     try:
         result = groove_train_optimized(
             device=device,

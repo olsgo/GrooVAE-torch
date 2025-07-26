@@ -204,7 +204,7 @@ def main():
     parser.add_argument("--num-random", type=int, default=20, help="Number of random generations")
     parser.add_argument("--num-variations", type=int, default=15, help="Number of input variations")
     parser.add_argument("--num-interpolations", type=int, default=10, help="Number of interpolation sequences")
-    parser.add_argument("--data-type", default="humanize", choices=["humanize", "tapify"], help="Data type")
+    parser.add_argument("--data-type", default="humanize", help="Data type")
     parser.add_argument("--temperature", type=float, default=1.0, help="Sampling temperature")
     parser.add_argument("--hit-threshold", type=float, default=0.5, help="Hit threshold for drum hits")
     

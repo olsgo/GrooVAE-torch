@@ -29,9 +29,9 @@ class Config:
         return device
     
     # M1 Max optimized hyperparameters
-    # Increased batch sizes to leverage 64GB unified memory
-    BATCH_SIZE = 1024  # Increased from 512 for M1 Max's large memory
-    BATCH_SIZE_VAL = 1024  # Keep validation batch size large too
+    # Reduced batch sizes to handle large datasets
+    BATCH_SIZE = 256  # Further reduced from 512
+    BATCH_SIZE_VAL = 256  # Keep validation batch size consistent
     
     # Data loading optimized for M1 Max
     # M1 Max has 10 performance cores, optimize worker count
@@ -63,10 +63,40 @@ class Config:
     LR_MIN = 1e-6
     
     # Data file names
-    TRAIN_FILES = {
-        'humanize': ['humanize_train.pkl', 'humanize_valid.pkl', 'humanize_test.pkl'],
-        'tapify': ['tapify_train.pkl', 'tapify_valid.pkl', 'tapify_test.pkl']
-    }
+    @classmethod
+    def get_available_datasets(cls):
+        """Dynamically discover available datasets from processed directory"""
+        import glob
+        
+        if not os.path.exists(cls.PROCESSED_DATA_DIR):
+            return {}
+        
+        # Find all *_train.pkl files
+        train_files = glob.glob(os.path.join(cls.PROCESSED_DATA_DIR, '*_train.pkl'))
+        
+        datasets = {}
+        for train_file in train_files:
+            # Extract dataset name (remove _train.pkl suffix)
+            basename = os.path.basename(train_file)
+            dataset_name = basename.replace('_train.pkl', '')
+            
+            # Check if corresponding valid and test files exist
+            valid_file = os.path.join(cls.PROCESSED_DATA_DIR, f'{dataset_name}_valid.pkl')
+            test_file = os.path.join(cls.PROCESSED_DATA_DIR, f'{dataset_name}_test.pkl')
+            
+            if os.path.exists(valid_file) and os.path.exists(test_file):
+                datasets[dataset_name] = [
+                    f'{dataset_name}_train.pkl',
+                    f'{dataset_name}_valid.pkl', 
+                    f'{dataset_name}_test.pkl'
+                ]
+        
+        return datasets
+    
+    # Replace the hardcoded TRAIN_FILES with dynamic discovery
+    @property
+    def TRAIN_FILES(self):
+        return self.get_available_datasets()
     
     # Model saving
     SAVE_EVERY_N_EPOCHS = 10
