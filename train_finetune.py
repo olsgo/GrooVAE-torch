@@ -5,6 +5,7 @@ import os
 import glob
 import argparse
 from pathlib import Path
+from datetime import datetime
 
 from model import Encoder, Decoder
 from data_loader_optimized import create_optimized_data_loaders
@@ -156,13 +157,17 @@ def main():
     parser.add_argument('--model-path', type=str, help='Path to a full model .pth file')
     parser.add_argument('--list-models', action='store_true', help='List available pre-trained models')
     # Remove the choices parameter to allow any dataset name
-    parser.add_argument('--data-type', type=str, default='humanize',
+    parser.add_argument('--data-type', type=str, default='groove_humanize',
                        help='Type of data to use for fine-tuning (auto-discovered from processed directory)')
-    parser.add_argument('--epochs', type=int, default=50, help='Number of epochs for fine-tuning')
+    parser.add_argument('--epochs', type=int, default=150, help='Number of epochs for fine-tuning')
     parser.add_argument('--lr-factor', type=float, default=0.1, help='Learning rate reduction factor')
     parser.add_argument('--freeze-encoder', action='store_true', help='Freeze encoder during fine-tuning')
     parser.add_argument('--freeze-decoder-layers', type=int, default=0, help='Number of decoder layers to freeze')
     parser.add_argument('--save-dir', type=str, default='saved_models', help='Directory to save fine-tuned models')
+    parser.add_argument('--run-name', type=str, default=None, help='Custom run name for saved files')
+    parser.add_argument('--batch-size', type=int, default=None, help='Override training batch size')
+    parser.add_argument('--val-batch-size', type=int, default=None, help='Override validation batch size')
+    parser.add_argument('--lr', type=float, default=None, help='Override base learning rate used before lr-factor')
     
     args = parser.parse_args()
     
@@ -246,9 +251,8 @@ def main():
     
     # Fine-tune the model
     print(f"Starting fine-tuning for {args.epochs} epochs...")
-    
     try:
-        result = groove_train_optimized(
+        history = groove_train_optimized(
             device=device,
             train_loader=train_loader,
             val_loader=val_loader,
@@ -257,29 +261,81 @@ def main():
             epochs=args.epochs,
             config=config
         )
-        # Handle multiple return values safely
-        if isinstance(result, tuple) and len(result) >= 2:
-            train_losses, valid_losses = result[0], result[1]
-        else:
-            train_losses, valid_losses = [], []
-            print("Warning: Unexpected return format from training function")
-        
+        # Expect a dict history from groove_train_optimized
+        if not isinstance(history, dict) or 'train_loss' not in history or 'val_loss' not in history:
+            raise RuntimeError("Unexpected return format from training function (expected dict with train_loss/val_loss)")
         print("\n✓ Fine-tuning completed successfully!")
-        print(f"Final training loss: {train_losses[-1]:.4f}")
-        print(f"Final validation loss: {valid_losses[-1]:.4f}")
-        
-        # Save fine-tuned models
-        model_name = f"{selected_model}_finetuned_{args.data_type}"
+        print(f"Final training loss: {history['train_loss'][-1]:.4f}")
+        print(f"Final validation loss: {history['val_loss'][-1]:.4f}")
+        # Descriptive model name
+        date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        base_dataset = args.data_type.replace('_humanize','')
+        model_name = args.run_name if args.run_name else f"humanize_{base_dataset}_nuanced_{date_str}"
+        # Save fine-tuned models (separate + combined with metadata) and summary
         encoder_path = save_dir / f"{model_name}_encoder.pt"
         decoder_path = save_dir / f"{model_name}_decoder.pt"
-        
         torch.save(encoder.state_dict(), encoder_path)
         torch.save(decoder.state_dict(), decoder_path)
-        
-        print(f"Models saved:")
+        # Combined checkpoint with metadata
+        combined_path = save_dir / f"{model_name}.pth"
+        total_params = sum(p.numel() for p in encoder.parameters()) + sum(p.numel() for p in decoder.parameters())
+        torch.save({
+            'encoder_state_dict': encoder.state_dict(),
+            'decoder_state_dict': decoder.state_dict(),
+            'epoch': args.epochs,
+            'dataset': args.data_type,
+            'base_model': 'magenta_humanize',
+            'model_name': model_name,
+            'training_type': 'groove_fine_tune',
+            'history': history,
+            'config': {
+                'BATCH_SIZE': config.BATCH_SIZE,
+                'LEARNING_RATE': config.LEARNING_RATE,
+                'ENC_HIDDEN_SIZE': config.ENC_HIDDEN_SIZE,
+                'ENC_LATENT_DIM': config.ENC_LATENT_DIM,
+                'DEC_HIDDEN_SIZE': config.DEC_HIDDEN_SIZE,
+                'KL_WEIGHT': config.KL_WEIGHT,
+                'KL_WARMUP_EPOCHS': config.KL_WARMUP_EPOCHS,
+                'TEACHER_FORCING_RATIO': config.TEACHER_FORCING_RATIO,
+                'MAX_GRAD_NORM': config.MAX_GRAD_NORM,
+                'LR_SCHEDULER': config.LR_SCHEDULER,
+                'LR_MIN': config.LR_MIN
+            },
+            'total_parameters': total_params,
+            'timestamp': date_str
+        }, combined_path)
+        # Human-readable summary
+        summary_path = save_dir / f"{model_name}_summary.txt"
+        with open(summary_path, 'w') as f:
+            f.write("GrooVAE Humanize Fine-tuning Summary\n")
+            f.write("="*50 + "\n")
+            f.write(f"Model Name: {model_name}\n")
+            f.write(f"Base Model: Magenta Humanize (groovae_2bar_humanize)\n")
+            f.write(f"Dataset: {args.data_type}\n")
+            f.write(f"Timestamp: {date_str}\n")
+            f.write("\nConfiguration:\n")
+            f.write(f"  Epochs: {args.epochs}\n")
+            f.write(f"  Batch Size: {config.BATCH_SIZE}\n")
+            f.write(f"  Learning Rate (base): {config.LEARNING_RATE}\n")
+            f.write(f"  Fine-tune LR: {config.LEARNING_RATE * args.lr_factor:.6f}\n")
+            f.write(f"  KL Weight: {config.KL_WEIGHT}\n")
+            f.write(f"  KL Warmup: {config.KL_WARMUP_EPOCHS}\n")
+            f.write(f"  Grad Clip: {config.MAX_GRAD_NORM}\n")
+            f.write(f"  LR Scheduler/Min: {config.LR_SCHEDULER}/{config.LR_MIN}\n")
+            f.write(f"  TF Ratio: {config.TEACHER_FORCING_RATIO}\n")
+            f.write("\nResults:\n")
+            f.write(f"  Best Validation Loss: {min(history['val_loss']):.6f}\n")
+            f.write(f"  Final Training Loss: {history['train_loss'][-1]:.6f}\n")
+            f.write(f"  Final Validation Loss: {history['val_loss'][-1]:.6f}\n")
+            f.write(f"\nArchitecture:\n")
+            f.write(f"  Encoder Hidden/Latent: {config.ENC_HIDDEN_SIZE}/{config.ENC_LATENT_DIM}\n")
+            f.write(f"  Decoder Hidden: {config.DEC_HIDDEN_SIZE}\n")
+            f.write(f"  Total Parameters: {total_params:,}\n")
+        print("Models saved:")
         print(f"  Encoder: {encoder_path}")
         print(f"  Decoder: {decoder_path}")
-        
+        print(f"  Combined: {combined_path}")
+        print(f"  Summary: {summary_path}")
     except Exception as e:
         print(f"Error during fine-tuning: {e}")
         import traceback

@@ -60,6 +60,23 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
     best_val_loss = float('inf')
     
     for epoch in range(1, epochs + 1):
+        # KL annealing - gradually increase KL weight
+        if hasattr(config, 'KL_WARMUP_EPOCHS'):
+            kl_weight = min(config.KL_WEIGHT, epoch * config.KL_WEIGHT / config.KL_WARMUP_EPOCHS)
+        else:
+            kl_weight = config.KL_WEIGHT
+        
+        # Add disk space check every 10 epochs
+        if epoch % 10 == 0:
+            import shutil
+            total, used, free = shutil.disk_usage(config.MODEL_SAVE_DIR)
+            free_gb = free / (1024**3)
+            print(f"💾 Disk space check (Epoch {epoch}): {free_gb:.1f}GB available")
+            
+            if free_gb < 5:
+                print(f"🚨 STOPPING: Critical disk space ({free_gb:.1f}GB)")
+                break
+        
         start_time = time()
         
         train_loss = 0
@@ -105,7 +122,7 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
                     kl_loss = -0.5 * torch.sum(
                         1 + x_train_std - x_train_mu.pow(2) - x_train_std.exp()
                     ) / x_train_mu.size(0)
-                    loss = reconstruction_loss + config.KL_WEIGHT * kl_loss
+                    loss = reconstruction_loss + kl_weight * kl_loss
                 
                 # Backward pass with gradient scaling
                 scaler.scale(loss).backward()
@@ -139,7 +156,7 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
                 kl_loss = -0.5 * torch.sum(
                     1 + x_train_std - x_train_mu.pow(2) - x_train_std.exp()
                 ) / x_train_mu.size(0)
-                loss = reconstruction_loss + config.KL_WEIGHT * kl_loss
+                loss = reconstruction_loss + kl_weight * kl_loss
                 
                 # Backward pass
                 loss.backward()
@@ -159,7 +176,8 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
                 train_pbar.set_postfix({
                     'loss': f'{loss.item():.4f}',
                     'rec_loss': f'{reconstruction_loss.item():.4f}',
-                    'kl_loss': f'{kl_loss.item():.4f}'
+                    'kl_loss': f'{kl_loss.item():.4f}',
+                    'kl_weight': f'{kl_weight:.4f}'
                 })
         
         # Update schedulers
@@ -202,7 +220,7 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
                         kl_loss = -0.5 * torch.sum(
                             1 + x_val_std - x_val_mu.pow(2) - x_val_std.exp()
                         ) / x_val_mu.size(0)
-                        loss = reconstruction_loss + config.KL_WEIGHT * kl_loss
+                        loss = reconstruction_loss + kl_weight * kl_loss
                 else:
                     # Forward pass
                     z, x_val_mu, x_val_std = encoder(x_val)
@@ -217,7 +235,7 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
                     kl_loss = -0.5 * torch.sum(
                         1 + x_val_std - x_val_mu.pow(2) - x_val_std.exp()
                     ) / x_val_mu.size(0)
-                    loss = reconstruction_loss + config.KL_WEIGHT * kl_loss
+                    loss = reconstruction_loss + kl_weight * kl_loss
                 
                 val_loss += loss.item()
                 
@@ -248,15 +266,26 @@ def groove_train_optimized(device, train_loader, val_loader, model, optimizer, e
     return history
 
 def save_checkpoint(encoder, decoder, enc_optimizer, dec_optimizer, epoch, val_loss, config, is_best=False):
-    """Save model checkpoint optimized for M1 Max"""
+    "Save model checkpoint with enhanced size and disk monitoring"
+    import shutil
+    
+    # Check available disk space before saving
+    total, used, free = shutil.disk_usage(config.MODEL_SAVE_DIR)
+    free_gb = free / (1024**3)
+    
+    if free_gb < 5:  # Less than 5GB available
+        print(f"🚨 CRITICAL: Very low disk space ({free_gb:.1f} GB)")
+        print("Skipping checkpoint to prevent disk full")
+        return
+    elif free_gb < 10:  # Less than 10GB available
+        print(f"⚠️  WARNING: Low disk space ({free_gb:.1f} GB)")
+    
     checkpoint = {
         'epoch': epoch,
         'encoder_state_dict': encoder.state_dict(),
         'decoder_state_dict': decoder.state_dict(),
-        'enc_optimizer_state_dict': enc_optimizer.state_dict(),
-        'dec_optimizer_state_dict': dec_optimizer.state_dict(),
+        # Remove optimizer states to reduce size
         'val_loss': val_loss,
-        'config': config.__dict__ if hasattr(config, '__dict__') else config
     }
     
     if is_best:
@@ -264,10 +293,18 @@ def save_checkpoint(encoder, decoder, enc_optimizer, dec_optimizer, epoch, val_l
     else:
         filename = os.path.join(config.MODEL_SAVE_DIR, f'checkpoint_epoch_{epoch}.pth')
     
+    # Save and monitor size
     torch.save(checkpoint, filename)
+    file_size = os.path.getsize(filename) / (1024*1024)  # MB
+    print(f"💾 Checkpoint saved: {file_size:.1f}MB - {filename}")
+    print(f"💾 Remaining disk space: {free_gb:.1f}GB")
+    
+    # Alert if file is suspiciously large
+    if file_size > 100:  # Alert if > 100MB
+        print(f"⚠️  WARNING: Checkpoint file is unusually large ({file_size:.1f}MB)")
 
 def load_checkpoint(checkpoint_path, encoder, decoder, enc_optimizer=None, dec_optimizer=None):
-    """Load model checkpoint"""
+    "Load model checkpoint"
     checkpoint = torch.load(checkpoint_path, map_location='cpu')
     
     encoder.load_state_dict(checkpoint['encoder_state_dict'])
@@ -279,3 +316,24 @@ def load_checkpoint(checkpoint_path, encoder, decoder, enc_optimizer=None, dec_o
         dec_optimizer.load_state_dict(checkpoint['dec_optimizer_state_dict'])
     
     return checkpoint['epoch'], checkpoint['val_loss']
+
+
+def emergency_cleanup(config):
+    """Emergency cleanup of old checkpoints when disk space is critical"""
+    import glob
+    import os
+    
+    checkpoint_pattern = os.path.join(config.MODEL_SAVE_DIR, "checkpoint_epoch_*.pth")
+    checkpoints = glob.glob(checkpoint_pattern)
+    
+    if len(checkpoints) > 3:  # Keep only 3 most recent
+        checkpoints.sort(key=os.path.getmtime)
+        old_checkpoints = checkpoints[:-3]
+        
+        for checkpoint in old_checkpoints:
+            try:
+                size_mb = os.path.getsize(checkpoint) / (1024*1024)
+                os.remove(checkpoint)
+                print(f"🗑️  Removed old checkpoint: {checkpoint} ({size_mb:.1f}MB)")
+            except Exception as e:
+                print(f"Failed to remove {checkpoint}: {e}")

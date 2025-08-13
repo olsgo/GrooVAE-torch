@@ -51,6 +51,7 @@ class Config:
     LEARNING_RATE = 2e-3  # Increased for larger batch size
     EPOCHS = 100
     KL_WEIGHT = 0.001
+    KL_WARMUP_EPOCHS = 20  # Add this line - KL annealing warmup period
     TEACHER_FORCING_RATIO = 0.5
     
     # M1 Max specific optimizations
@@ -99,8 +100,8 @@ class Config:
         return self.get_available_datasets()
     
     # Model saving
-    SAVE_EVERY_N_EPOCHS = 10
-    SAVE_BEST_MODEL = True
+    SAVE_EVERY_N_EPOCHS = 25  # Reduce from 10 to 25
+    SAVE_BEST_MODEL = True    # Keep this, but monitor size
     
     # Monitoring
     LOG_INTERVAL = 10  # Log every N batches
@@ -132,3 +133,9 @@ class Config:
         params['batch_size'] = cls.BATCH_SIZE_VAL
         params['shuffle'] = False
         return params
+    
+    # Disk space monitoring
+    MIN_DISK_SPACE_GB = 20  # Minimum disk space to start training
+    CRITICAL_DISK_SPACE_GB = 5  # Stop training if below this
+    CHECKPOINT_SIZE_WARNING_MB = 100  # Warn if checkpoint > this size
+    DISK_CHECK_FREQUENCY = 10  # Check disk space every N epochs

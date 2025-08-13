@@ -51,7 +51,7 @@ data/processed/
 *.csv
 
 # Model files
-saved_models/
+saved_models/toontrack_*.pkl
 *.pth
 *.pt
 checkpoints/

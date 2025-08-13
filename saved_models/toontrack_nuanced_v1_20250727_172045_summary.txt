@@ -1,0 +1,20 @@
+GrooVAE Training Summary
+==================================================
+Model Name: toontrack_nuanced_v1
+Dataset: toontrack
+Description: Optimized for timing and velocity nuances
+Timestamp: 20250727_172045
+
+Configuration:
+  Epochs: 100
+  Batch Size: 1024
+  Learning Rate: 0.001
+  Model Architecture: Enc(1024→512), Dec(512)
+  Total Parameters: 17,054,236
+  KL Weight: 0.0005
+  Teacher Forcing: 0.7
+
+Results:
+  Best Validation Loss: 1.487076
+  Final Training Loss: 1.046449
+  Final Validation Loss: 1.499591

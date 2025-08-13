@@ -1,0 +1,27 @@
+GrooVAE Humanize Fine-tuning Summary
+==================================================
+Model Name: groove_humanize_m1max
+Base Model: Magenta Humanize (groovae_2bar_humanize)
+Dataset: groove_humanize
+Timestamp: 20250811_185950
+
+Configuration:
+  Epochs: 150
+  Batch Size: 256
+  Learning Rate (base): 0.002
+  Fine-tune LR: 0.000200
+  KL Weight: 0.001
+  KL Warmup: 20
+  Grad Clip: 1.0
+  LR Scheduler/Min: cosine/1e-06
+  TF Ratio: 0.5
+
+Results:
+  Best Validation Loss: 1.629774
+  Final Training Loss: 1.506739
+  Final Validation Loss: 1.629818
+
+Architecture:
+  Encoder Hidden/Latent: 512/256
+  Decoder Hidden: 256
+  Total Parameters: 4,332,827

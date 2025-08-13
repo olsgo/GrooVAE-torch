@@ -118,6 +118,21 @@ def plot_training_history(history, save_path):
     print(f"Training history saved to {save_path}")
 
 
+def check_disk_space(min_gb=10):
+    """Check available disk space before training"""
+    import shutil
+    total, used, free = shutil.disk_usage("/")
+    free_gb = free / (1024**3)
+    print(f"💾 Available disk space: {free_gb:.1f} GB")
+    
+    if free_gb < min_gb:
+        print(f"⚠️  WARNING: Low disk space ({free_gb:.1f} GB < {min_gb} GB)")
+        response = input("Continue anyway? (y/N): ")
+        if response.lower() != 'y':
+            print("Training aborted due to low disk space")
+            exit(1)
+    return free_gb
+
 def main():
     parser = argparse.ArgumentParser(description='GrooVAE Training Optimized for M1 Max')
     parser.add_argument('--data-type', type=str, default='tapify', 
@@ -264,4 +279,8 @@ def main():
 
 
 if __name__ == "__main__":
+    # Add this after config setup but before training starts
+    print(f"\nChecking system resources...")
+    initial_disk_space = check_disk_space(min_gb=20)  # Require 20GB minimum
+    
     main()

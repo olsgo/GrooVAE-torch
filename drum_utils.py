@@ -175,41 +175,68 @@ def _extract_windows(tensor, window_size, hop_size):
     return [tensor[i:i + window_size, :] for i in range(
         0, len(tensor) - window_size + 1, hop_size)]
     
-def from_tensors_to_midi(tensor, steps_per_quarter=4, comp=9): 
-    def _zero_one_to_velocity(val):
-        output = int(np.round(val * 127))
-        return np.clip(output, 0, 127)
-
-    def _minus_1_1_to_offset(val):
-        output = val / 2
-        return np.clip(output, -0.5, 0.5)
-
+def from_tensors_to_midi(tensor, steps_per_quarter=16, comp=9, fs=None, tempo_bpm=120, source_ppq=96):
+    # Convert tensor to MIDI with proper resolution handling for Ableton Live exports.
+    midi_data = pretty_midi.PrettyMIDI(resolution=source_ppq, initial_tempo=tempo_bpm)
+    
+    # Use the model's actual temporal resolution
+    model_steps_per_quarter = 16  # What model was trained with
+    
+    # FIXED: Better step length calculation for proper tempo alignment
+    # Convert model steps to MIDI ticks based on the PPQ resolution
+    ticks_per_model_step = source_ppq / model_steps_per_quarter  # 96/16 = 6 ticks per step
+    seconds_per_tick = (60.0 / tempo_bpm) / source_ppq
+    step_length = ticks_per_model_step * seconds_per_tick
+    
+    # Create drum instrument
+    drum_instrument = pretty_midi.Instrument(program=0, is_drum=True, name='Drums')
+    midi_data.instruments.append(drum_instrument)
     standard, encoded = get_comp()
-    reverse_standard = {v: k for k, v in standard.items()}
-    reverse_encoded = {v: k for k, v in encoded.items()}
-
-    # Initialize PrettyMIDI object
-    midi_data = pretty_midi.PrettyMIDI()
-    inst = pretty_midi.Instrument(program=0, is_drum=True)
-    midi_data.instruments.append(inst)
-
-    beat_length = 60.0 / 120  # Assuming QPM = 120
-    step_length = beat_length / steps_per_quarter 
-
-    for i, step in enumerate(tensor):
-        hits = step[:comp]  
-        velocities = step[comp:2*comp]  
-        offsets = step[2*comp:] 
-
-        for j in range(len(hits)):
-            if hits[j] > 0.5:
-                pitch = reverse_standard[reverse_encoded[j]]
-                velocity = _zero_one_to_velocity(velocities[j])
-                offset = _minus_1_1_to_offset(offsets[j])
-
-                start_time = float((i - offset) * step_length)
-                end_time = float(start_time + step_length)
-                note = pretty_midi.Note(velocity, pitch, start_time, end_time)
-                inst.notes.append(note)
-
+    
+    for i in range(tensor.shape[0]):
+        for j in range(comp):
+            # FIXED: Better hit threshold to avoid noise
+            hit = tensor[i, j].item()
+            if hit > 0.15:  # Slightly higher threshold for cleaner output
+                velocity = tensor[i, j + comp].item()
+                offset = tensor[i, j + 2 * comp].item()
+                
+                # Convert to MIDI values with much better velocity scaling
+                pitch = list(standard.keys())[j]
+                
+                # FIXED: More conservative velocity mapping
+                velocity_base = velocity * 70 + 40  # 40-110 range (more realistic)
+                velocity_noise = np.random.uniform(-3, 3)  # Subtle variation
+                velocity_midi = int(velocity_base + velocity_noise)
+                velocity_midi = max(velocity_midi, 40)  # Realistic minimum
+                velocity_midi = min(velocity_midi, 120)  # Realistic maximum
+                
+                # FIXED: Much tighter offset scaling to prevent timing drift
+                offset = offset * 0.08  # Even tighter timing
+                
+                # Calculate timing with proper resolution
+                start_time = (i + offset) * step_length
+                
+                # FIXED: Better note duration based on tempo and drum type
+                if j in [0, 1]:  # Bass, snare - longer sustain
+                    duration = step_length * 0.8
+                elif j in [2, 3]:  # Hi-hats - shorter
+                    duration = step_length * 0.3
+                else:  # Toms, cymbals - medium
+                    duration = step_length * 0.6
+                
+                duration = max(duration, 0.05)  # Minimum duration
+                end_time = start_time + duration
+                
+                # Create note
+                note = pretty_midi.Note(
+                    velocity=velocity_midi,
+                    pitch=pitch,
+                    start=start_time,
+                    end=end_time
+                )
+                drum_instrument.notes.append(note)
+    
+    midi_data.instruments.append(drum_instrument)
+    
     return midi_data
